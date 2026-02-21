@@ -119,11 +119,8 @@ Example:
 ```text
 .
 ├── main.c        # Entry point
-├── lcs.c         # LCS algorithm
-├── diff.c        # Diff generation
-├── patch.c       # Patch application
-├── utils.c       # Helper functions
-├── utils.h
+├── logger.h       # Helper functions
+├── Makefile
 └── README.md
 ```
 
