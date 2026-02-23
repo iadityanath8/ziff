@@ -3,6 +3,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
+
+#define RED    "\033[31m"
+#define GREEN  "\033[32m"
+#define RESET   "\033[0m"
 
 #define LINE_BUFF 1811
 #define get(x,y,_c) (x)*(_c) + (y) 
@@ -44,6 +49,26 @@ typedef struct {
   i32 count;
   i32 capacity;
 }Stack;
+
+typedef enum {
+  CMD_NONE = 0,
+  CMD_DIFF,
+  CMD_PATCH
+}CommandType;
+
+typedef struct {  
+  int ignore_case; // this is the ignore case in here --ignore-case
+}Flags;
+
+typedef struct {
+  CommandType cmd;
+  
+  str   file1;
+  str   file2;
+  str   file3; // patch output file  
+  Flags args;
+}ArgList;
+
 
 static inline void free_st(Stack* st) {
   for (i32 i = 0;i < st->count;i++) {
@@ -98,36 +123,61 @@ static inline u32 lcs(Lines* a,Lines* b,u32* table) {
   return table[get(n,_m,m)];
 }
 
-
-void print_diff_from_dp(Lines* A, Lines* B) {
+static inline void print_diff_from_dp(Lines* A, Lines* B) {
   int i = A->count, j = B->count;
   u32 m = j + 1;
-  u32* table = ALLOC((i + 1)*(j + 1),u32);
+
+  u32* table = ALLOC((i + 1) * (j + 1), u32);
   Stack st = {0};
 
   char buf[LINE_BUFF];
-  lcs(A,B,table);
+
+  /* Detect terminal */
+  int use_color = isatty(STDOUT_FILENO);
+
+  /* Select color strings */
+  const char *red   = use_color ? RED   : "";
+  const char *green = use_color ? GREEN : "";
+  const char *reset = use_color ? RESET : "";
+
+  lcs(A, B, table);
+
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && strcmp(A->items[i-1],B->items[j-1]) == 0) {
-      snprintf(buf,LINE_BUFF,"  %s \n", A->items[i-1]);
-      da_append(&st,strdup(buf));
-      i--; j--;
-    } else if (i > 0 && (j == 0 || table[get(i-1,j,m)] >= table[get(i,j-1,m)])) {
-      // deletion
-      snprintf(buf,LINE_BUFF,"- %s\n", A->items[i-1]);
-      da_append(&st,strdup(buf));
+
+    if (i > 0 && j > 0 && strcmp(A->items[i-1], B->items[j-1]) == 0) {
+      snprintf(buf, LINE_BUFF, " %s", A->items[i-1]);
+      da_append(&st, strdup(buf));
       i--;
-    } else if (j > 0 && (i == 0 || table[get(i,j-1,m)] > table[get(i-1,j,m)] )) {
-      // insertion
-      snprintf(buf,LINE_BUFF,"+ %s\n", B->items[j-1]);
-      da_append(&st,strdup(buf));
+      j--;
+    }
+
+    else if (i > 0 && (j == 0 || table[get(i-1, j, m)] >= table[get(i, j-1, m)])) {
+      snprintf(buf, LINE_BUFF,
+          "%s- %s%s",
+          red,
+          A->items[i-1],
+          reset);
+      da_append(&st, strdup(buf));
+      i--;
+    }
+
+    /* Insertion */
+    else if (j > 0 && (i == 0 || table[get(i, j-1, m)] > table[get(i-1, j, m)])) {
+      snprintf(buf, LINE_BUFF,
+          "%s+ %s%s",
+          green,
+          B->items[j-1],
+          reset);
+      da_append(&st, strdup(buf));
       j--;
     }
   }
 
-  for (i32 i = st.count - 1;i >= 0;i--) {
-    printf("%s",st.items[i]);
+  /* Print in correct order */
+  for (i32 k = st.count - 1; k >= 0; k--) {
+    printf("%s", st.items[k]);
   }
+
   free_st(&st);
   free(table);
 }
@@ -163,7 +213,6 @@ static inline void apply_patch(Lines *orig, Lines *diff, const char *out_file) {
         i++;
       }
     }
-
     else if (line[0] == '-' && line[1] == ' ') {
       i++;
     }
@@ -183,8 +232,75 @@ static inline void usage(const char *prog) {
   exit(EXIT_FAILURE);
 }
 
-i32 main(i32 argc, str argv[]) {
+static inline void init_args(ArgList* a) {
+  a->cmd = CMD_NONE;
+  a->file1 = NULL;
+  a->file2 = NULL;
+  a->file3 = NULL;
+  a->args.ignore_case = 0;
+}
 
+
+
+static inline i32 parse_args(i32 argc,str argv[],ArgList* out) {
+  init_args(out);
+  i32 i = 1;
+  
+  if (i < argc) {
+    if (argc < 4) return -1;
+    if (strcmp(argv[i],"diff") == 0) {
+      out->cmd = CMD_DIFF;
+      i++;
+    }else if (strcmp(argv[i],"patch")==0) {
+      out->cmd = CMD_PATCH;
+      i++;
+    }
+
+    out->file1 = argv[i++];
+    out->file2 = argv[i++];
+    
+    if (out->cmd == CMD_PATCH) {
+      if (argc < 5) return -3;
+      out->file3 = argv[i++];
+    }
+
+    while (i < argc) {
+      if (strcmp(argv[i],"--ignore-case")==0) {
+        out->args.ignore_case = 1;
+      }else {
+        return -2;
+      }
+      i++;
+    }
+  }
+  return 0;
+}
+
+i32 main(i32 argc, str argv[]) {
+  if (argc < 2) usage(argv[0]);
+  ArgList l;
+  if (parse_args(argc,argv,&l) != 0) {
+    usage(argv[0]);
+  }
+
+  Lines l1 = read_lines(l.file1);
+  Lines l2 = read_lines(l.file2);
+  if (l.cmd == CMD_DIFF) {
+    print_diff_from_dp(&l1,&l2);
+    free_lines(&l1);
+    free_lines(&l2);
+  }else if (l.cmd == CMD_PATCH) {
+    apply_patch(&l1,&l2,l.file3);
+    free_lines(&l1);
+    free_lines(&l2);
+  }else {
+    printf("Unknown command\n");
+    usage(argv[0]);
+  }
+  return 0;
+}
+
+i32 main2(i32 argc, str argv[]) {
   if (argc < 2)
     usage(argv[0]);
 
