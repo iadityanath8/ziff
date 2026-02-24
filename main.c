@@ -4,6 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #define RED    "\033[31m"
 #define GREEN  "\033[32m"
@@ -265,6 +266,7 @@ static inline i32 parse_args(i32 argc,str argv[],ArgList* out) {
     }
 
     while (i < argc) {
+      /** All cases should be covered  **/
       if (strcmp(argv[i],"--ignore-case")==0) {
         out->args.ignore_case = 1;
       }else {
@@ -274,6 +276,21 @@ static inline i32 parse_args(i32 argc,str argv[],ArgList* out) {
     }
   }
   return 0;
+}
+
+static inline void lowestr(str ss) {
+  for (u32 i = 0;ss[i] != '\0';i++) {
+    ss[i] = tolower(ss[i]);
+  } 
+}
+
+static inline void _lower(Lines* l1, Lines* l2) {
+  for (i32 i = 0;i < l1->count;i++) {
+    lowestr(l1->items[i]);
+  }
+  for (i32 i = 0;i < l1->count;i++) {
+    lowestr(l2->items[i]);
+  }
 }
 
 i32 main(i32 argc, str argv[]) {
@@ -286,6 +303,9 @@ i32 main(i32 argc, str argv[]) {
   Lines l1 = read_lines(l.file1);
   Lines l2 = read_lines(l.file2);
   if (l.cmd == CMD_DIFF) {
+    if (l.args.ignore_case == 1) {
+      _lower(&l1,&l2);
+    }
     print_diff_from_dp(&l1,&l2);
     free_lines(&l1);
     free_lines(&l2);
