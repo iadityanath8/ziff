@@ -208,7 +208,7 @@ static inline void apply_patch(Lines *orig, Lines *diff, const char *out_file) {
   for (i32 d = 0; d < diff->count; d++) {
     str line = diff->items[d];
 
-    if (line[0] == ' ' && line[1] == ' ') {
+    if (line[0] == ' ') {
       if (i < orig->count) {
         fputs(orig->items[i], out);
         i++;
@@ -288,7 +288,7 @@ static inline void _lower(Lines* l1, Lines* l2) {
   for (i32 i = 0;i < l1->count;i++) {
     lowestr(l1->items[i]);
   }
-  for (i32 i = 0;i < l1->count;i++) {
+  for (i32 i = 0;i < l2->count;i++) {
     lowestr(l2->items[i]);
   }
 }
